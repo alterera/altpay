@@ -1,0 +1,169 @@
+// pay.alterera.net — payment service schema.
+//
+// Runs on its own database instance, separate from the hotel backend. The split is
+// deliberate: this service holds provider credentials and provider state, and the
+// hotel backend must never be able to read or write it directly.
+//
+// Nothing here stores card numbers, UPI IDs, or any other instrument detail. Those
+// live only inside the archived provider payloads.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TransactionStatus {
+  /// Row exists, provider order not created yet.
+  CREATED
+  /// Provider order created, awaiting an outcome.
+  PENDING
+  SUCCESS
+  FAILED
+  /// Order lapsed or was terminated without payment.
+  EXPIRED
+  /// Provider and local records disagree. Never notified to the hotel.
+  NEEDS_ATTENTION
+}
+
+enum NotificationStatus {
+  PENDING
+  DELIVERED
+  /// Hotel rejected it permanently (4xx). Retrying cannot help.
+  FAILED_PERMANENT
+  /// Retries exhausted.
+  NEEDS_ATTENTION
+}
+
+enum TaskType {
+  REFUND_REQUIRED
+  NEEDS_ATTENTION
+  HOTEL_REJECTED
+}
+
+enum TaskStatus {
+  OPEN
+  RESOLVED
+}
+
+/// One checkout attempt. `paymentReference` is minted by the hotel backend and is
+/// the only identifier both services share.
+model PaymentTransaction {
+  id               String @id @default(uuid()) @db.Uuid
+  paymentReference String @unique
+  /// The hotel's reservation number. Correlation only — this service never
+  /// interprets reservation state.
+  reservationReference String
+
+  provider          String
+  providerOrderId   String?
+  providerPaymentId String?
+
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("INR")
+  status   TransactionStatus @default(CREATED)
+
+  paymentSessionId String?
+  checkoutUrl      String?
+  sessionExpiresAt DateTime?
+
+  customerName  String?
+  customerPhone String?
+  customerEmail String?
+  returnUrl     String?
+
+  paidAt        DateTime?
+  paymentMethod String?
+  failureReason String?
+
+  lastReconciledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notifications       HotelNotification[]
+  reconciliationTasks ReconciliationTask[]
+
+  @@unique([provider, providerOrderId])
+  @@unique([provider, providerPaymentId])
+  @@index([reservationReference])
+  @@index([status, createdAt])
+  @@map("payment_transactions")
+}
+
+/// Every provider event we received, verified or not. The unique
+/// `(provider, providerEventId)` pair is what makes redelivery a no-op.
+model WebhookEvent {
+  id              String @id @default(uuid()) @db.Uuid
+  provider        String
+  providerEventId String
+  eventType       String?
+
+  signatureVerified Boolean @default(false)
+  payload           Json
+
+  receivedAt       DateTime  @default(now())
+  processedAt      DateTime?
+  processingStatus String    @default("PROCESSING")
+  processingError  String?
+
+  @@unique([provider, providerEventId])
+  @@index([processingStatus, receivedAt])
+  @@map("webhook_events")
+}
+
+/// Transactional outbox. Written in the same transaction that records the provider
+/// outcome, so a verified payment can never fail to produce a notification — the
+/// delivery just happens later.
+model HotelNotification {
+  id                   String             @id @default(uuid()) @db.Uuid
+  paymentTransactionId String             @db.Uuid
+  paymentTransaction   PaymentTransaction @relation(fields: [paymentTransactionId], references: [id], onDelete: Cascade)
+
+  /// Sent as X-Alterera-Event-Id; the hotel's idempotency key for this event.
+  eventId   String @unique
+  eventType String
+  payload   Json
+
+  status         NotificationStatus @default(PENDING)
+  attempts       Int                @default(0)
+  lastAttemptAt  DateTime?
+  nextAttemptAt  DateTime           @default(now())
+  lastError      String?
+  lastResponseStatus Int?
+  lastResponseBody   Json?
+  deliveredAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@map("hotel_notifications")
+}
+
+/// Work that needs a human. Phase B has no HTTP API for these on purpose — they are
+/// read from the database and alerting, because a shared service token is not
+/// operator authentication.
+model ReconciliationTask {
+  id                   String             @id @default(uuid()) @db.Uuid
+  paymentTransactionId String             @db.Uuid
+  paymentTransaction   PaymentTransaction @relation(fields: [paymentTransactionId], references: [id], onDelete: Cascade)
+
+  taskType TaskType
+  status   TaskStatus @default(OPEN)
+
+  hotelResponseStatus Int?
+  hotelResponseBody   Json?
+  notes               String?
+
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([paymentTransactionId])
+  @@map("reconciliation_tasks")
+}
