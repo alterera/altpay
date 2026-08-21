@@ -15,6 +15,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  schemas  = ["pay_service"]
 }
 
 enum TransactionStatus {
@@ -28,6 +29,8 @@ enum TransactionStatus {
   EXPIRED
   /// Provider and local records disagree. Never notified to the hotel.
   NEEDS_ATTENTION
+
+  @@schema("pay_service")
 }
 
 enum NotificationStatus {
@@ -37,17 +40,23 @@ enum NotificationStatus {
   FAILED_PERMANENT
   /// Retries exhausted.
   NEEDS_ATTENTION
+
+  @@schema("pay_service")
 }
 
 enum TaskType {
   REFUND_REQUIRED
   NEEDS_ATTENTION
   HOTEL_REJECTED
+
+  @@schema("pay_service")
 }
 
 enum TaskStatus {
   OPEN
   RESOLVED
+
+  @@schema("pay_service")
 }
 
 /// One checkout attempt. `paymentReference` is minted by the hotel backend and is
@@ -92,6 +101,7 @@ model PaymentTransaction {
   @@unique([provider, providerPaymentId])
   @@index([reservationReference])
   @@index([status, createdAt])
+  @@schema("pay_service")
   @@map("payment_transactions")
 }
 
@@ -113,6 +123,7 @@ model WebhookEvent {
 
   @@unique([provider, providerEventId])
   @@index([processingStatus, receivedAt])
+  @@schema("pay_service")
   @@map("webhook_events")
 }
 
@@ -142,6 +153,7 @@ model HotelNotification {
   updatedAt DateTime @updatedAt
 
   @@index([status, nextAttemptAt])
+  @@schema("pay_service")
   @@map("hotel_notifications")
 }
 
@@ -165,5 +177,6 @@ model ReconciliationTask {
 
   @@index([status, createdAt])
   @@index([paymentTransactionId])
+  @@schema("pay_service")
   @@map("reconciliation_tasks")
 }
