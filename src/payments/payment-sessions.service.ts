@@ -13,6 +13,7 @@ import {
 } from '../cashfree/cashfree.client';
 import { Prisma, TransactionStatus } from '../prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PaymentConfig } from '../config/payment.config';
 import { CreatePaymentSessionDto } from './dto/create-payment-session.dto';
 
 export const PROVIDER = 'CASHFREE';
@@ -24,6 +25,7 @@ export type PaymentSessionResult = {
     paymentSessionId: string;
     providerOrderId: string;
     checkoutUrl: string;
+    cashfreeMode: 'production' | 'sandbox';
     status: TransactionStatus;
     sessionExpiresAt: string | null;
   };
@@ -50,6 +52,7 @@ export class PaymentSessionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cashfree: CashfreeClient,
+    private readonly config: PaymentConfig,
   ) {}
 
   async createSession(
@@ -81,6 +84,7 @@ export class PaymentSessionsService {
           paymentSessionId: transaction.paymentSessionId,
           providerOrderId: transaction.providerOrderId!,
           checkoutUrl: transaction.checkoutUrl,
+          cashfreeMode: this.config.cashfreeMode,
           status: transaction.status,
           sessionExpiresAt: transaction.sessionExpiresAt?.toISOString() ?? null,
         },
@@ -126,6 +130,7 @@ export class PaymentSessionsService {
         paymentSessionId: order.payment_session_id,
         providerOrderId: order.order_id,
         checkoutUrl,
+        cashfreeMode: this.config.cashfreeMode,
         status: updated.status,
         sessionExpiresAt: sessionExpiresAt.toISOString(),
       },

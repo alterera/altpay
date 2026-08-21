@@ -38,6 +38,11 @@ export class PaymentConfig {
     return this.config.get<string>('CASHFREE_ENV') === 'PRODUCTION';
   }
 
+  /** Cashfree JS SDK mode — must match the environment that minted the session. */
+  get cashfreeMode(): 'production' | 'sandbox' {
+    return this.isProduction ? 'production' : 'sandbox';
+  }
+
   get cashfreeBaseUrl(): string {
     const explicit = this.config.get<string>('CASHFREE_BASE_URL');
     if (explicit) return explicit.replace(/\/+$/, '');

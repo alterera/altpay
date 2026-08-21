@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { CashfreeClient } from '../cashfree/cashfree.client';
+import { PaymentConfig } from '../config/payment.config';
 import { Prisma, TransactionStatus } from '../prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePaymentSessionDto } from './dto/create-payment-session.dto';
@@ -46,6 +47,7 @@ describe('PaymentSessionsService', () => {
     terminateOrder: jest.Mock;
     buildCheckoutUrl: jest.Mock;
   };
+  let config: { cashfreeMode: 'sandbox' | 'production' };
   let service: PaymentSessionsService;
 
   beforeEach(() => {
@@ -78,9 +80,11 @@ describe('PaymentSessionsService', () => {
           'https://payments-test.cashfree.com/order/#session_abc',
         ),
     };
+    config = { cashfreeMode: 'sandbox' };
     service = new PaymentSessionsService(
       prisma as unknown as PrismaService,
       cashfree as unknown as CashfreeClient,
+      config as unknown as PaymentConfig,
     );
   });
 
@@ -89,6 +93,8 @@ describe('PaymentSessionsService', () => {
 
     expect(result.created).toBe(true);
     expect(result.session.checkoutUrl).toContain('session_abc');
+    expect(result.session.cashfreeMode).toBe('sandbox');
+    expect(result.session.paymentSessionId).toBe('session_abc');
     expect(cashfree.createOrder).toHaveBeenCalledTimes(1);
     const [createArg] = cashfree.createOrder.mock.calls[0] as [
       { orderId: string; amount: string },
