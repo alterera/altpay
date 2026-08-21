@@ -3,12 +3,30 @@ import { join } from 'path';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool, type PoolConfig } from 'pg';
 
-function stripSslQueryParams(connectionString: string): string {
+function stripPrismaQueryParams(connectionString: string): string {
   return connectionString
     .replace(/([?&])sslmode=[^&]*&?/g, '$1')
     .replace(/([?&])uselibpqcompat=[^&]*&?/g, '$1')
+    // Prisma-only; runtime pg uses search_path instead.
+    .replace(/([?&])schema=[^&]*&?/g, '$1')
     .replace(/\?&/, '?')
     .replace(/[?&]$/, '');
+}
+
+function resolvePgSchema(connectionString: string): string | undefined {
+  const normalized = connectionString.replace(/^postgresql:/, 'http:');
+  const schema = new URL(normalized).searchParams.get('schema');
+  return schema && schema.length > 0 ? schema : undefined;
+}
+
+function resolveSearchPath(
+  schema: string | undefined,
+): Pick<PoolConfig, 'options'> | Record<string, never> {
+  if (!schema) {
+    return {};
+  }
+
+  return { options: `-c search_path=${schema}` };
 }
 
 function resolvePgSsl(connectionString: string): Pick<PoolConfig, 'ssl'> {
@@ -41,9 +59,11 @@ function resolvePgSsl(connectionString: string): Pick<PoolConfig, 'ssl'> {
 }
 
 export function createPrismaPgAdapter(connectionString: string): PrismaPg {
+  const schema = resolvePgSchema(connectionString);
   const pool = new Pool({
-    connectionString: stripSslQueryParams(connectionString),
+    connectionString: stripPrismaQueryParams(connectionString),
     ...resolvePgSsl(connectionString),
+    ...resolveSearchPath(schema),
   });
 
   return new PrismaPg(pool);
