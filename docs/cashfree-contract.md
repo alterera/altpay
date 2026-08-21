@@ -73,8 +73,10 @@ Notes that matter:
   second order.
 - `order_amount` is a JSON number, not a string. We hold amounts as `Decimal(12,2)` and
   convert at the boundary only.
-- `order_expiry_time` is the reservation's `holdExpiresAt`, so a Cashfree order can never
-  outlive the inventory hold that backs it.
+- `order_expiry_time` starts from the reservation's `holdExpiresAt`, then is raised to at
+  least 16 minutes from order creation when the hold is shorter — Cashfree rejects anything
+  within 15 minutes. The hotel backend's hold TTL and
+  `PAYMENT_SESSION_MIN_HOLD_REMAINING_SECONDS` are sized to match.
 - `customer_phone` goes without the `+91` country prefix; Cashfree rejects some formats and
   accepts the bare 10-digit Indian number.
 - `notify_url` per order means we do not depend on a dashboard-wide webhook setting.

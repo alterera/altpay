@@ -2,6 +2,22 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PaymentConfig } from '../config/payment.config';
 import { CashfreeOrder, CashfreePayment } from './cashfree.types';
 
+/** Cashfree requires order_expiry_time to be more than 15 minutes from now. */
+export const CASHFREE_MIN_ORDER_TTL_MS = 16 * 60 * 1000;
+export const CASHFREE_MAX_ORDER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Aligns hold expiry with Cashfree's >15 min / <30 day window. */
+export function resolveCashfreeOrderExpiry(
+  holdExpiresAt: Date,
+  now = new Date(),
+): Date {
+  const minExpiry = new Date(now.getTime() + CASHFREE_MIN_ORDER_TTL_MS);
+  const maxExpiry = new Date(now.getTime() + CASHFREE_MAX_ORDER_TTL_MS);
+  const candidate =
+    holdExpiresAt.getTime() > minExpiry.getTime() ? holdExpiresAt : minExpiry;
+  return candidate.getTime() < maxExpiry.getTime() ? candidate : maxExpiry;
+}
+
 export type CreateOrderInput = {
   /** Our `paymentReference`; Cashfree enforces uniqueness, which makes this idempotent. */
   orderId: string;
@@ -42,11 +58,18 @@ export class CashfreeClient {
   constructor(private readonly config: PaymentConfig) {}
 
   async createOrder(input: CreateOrderInput): Promise<CashfreeOrder> {
+    const orderExpiry = resolveCashfreeOrderExpiry(input.expiresAt);
+    if (orderExpiry.getTime() !== input.expiresAt.getTime()) {
+      this.logger.warn(
+        `Raised order_expiry_time for ${input.orderId} from ${input.expiresAt.toISOString()} to ${orderExpiry.toISOString()} to satisfy Cashfree minimum TTL`,
+      );
+    }
+
     return this.request<CashfreeOrder>('POST', '/orders', {
       order_id: input.orderId,
       order_amount: Number(input.amount),
       order_currency: input.currency,
-      order_expiry_time: input.expiresAt.toISOString(),
+      order_expiry_time: orderExpiry.toISOString(),
       order_note: `AlterStays booking ${input.reservationReference}`,
       customer_details: {
         customer_id: `res_${input.reservationReference}`,
