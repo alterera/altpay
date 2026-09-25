@@ -1,0 +1,43 @@
+name: Deploy Alterera Payment
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+concurrency:
+  group: alterera-payment-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true
+
+          script: |
+            set -e
+
+            source ~/.nvm/nvm.sh
+
+            cd /var/www/payment-api
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            npm ci
+
+            npm run build
+
+            pm2 reload payment-api
+
+            echo "Payment service deployment completed."
