@@ -16,12 +16,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to EC2
+      - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script_stop: true
 
           script: |
@@ -29,15 +29,38 @@ jobs:
 
             source ~/.nvm/nvm.sh
 
-            cd /var/www/payment-api
+            APP_DIR=/var/www/payment-api
+            PM2_NAME=payment-api
 
+            echo "Starting payment service deployment..."
+
+            cd "$APP_DIR"
+
+            echo "Updating source..."
             git fetch origin main
             git reset --hard origin/main
 
+            echo "Validating environment..."
+            test -f .env || { echo "Server .env is missing at ${APP_DIR}/.env"; exit 1; }
+            for name in DATABASE_URL PORT CASHFREE_CLIENT_ID CASHFREE_CLIENT_SECRET HOTEL_BASE_URL HOTEL_SERVICE_TOKEN HOTEL_NOTIFICATION_SIGNING_SECRET; do
+              grep -Eq "^${name}=\"?[^\"[:space:]]" .env || { echo "Missing ${name} in server .env"; exit 1; }
+            done
+
+            echo "Installing dependencies..."
             npm ci
 
+            echo "Building application..."
             npm run build
 
-            pm2 reload payment-api
+            echo "Applying database migrations..."
+            npx prisma migrate deploy
+
+            echo "Reloading application..."
+            if pm2 describe "$PM2_NAME" > /dev/null 2>&1; then
+              pm2 reload "$PM2_NAME"
+            else
+              pm2 start dist/src/main.js --name "$PM2_NAME"
+            fi
+            pm2 save
 
             echo "Payment service deployment completed."
